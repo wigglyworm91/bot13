@@ -1,4 +1,5 @@
 import discord
+from discord.ext import commands
 import json
 import re
 from dotenv import dotenv_values
@@ -9,9 +10,10 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-client = discord.Client(intents=intents)
-
 PREFIX = 'b!'
+
+bot = commands.Bot(command_prefix=PREFIX, intents=intents)
+
 
 def load_settings(guild):
     try:
@@ -24,48 +26,50 @@ def save_settings(guild, settings):
     with open(f'.settings/{guild.id}.json', 'w') as f:
         return json.dump(settings, f)
 
-@client.event
+@bot.event
 async def on_ready():
-    print(f'We have logged in as {client.user}')
+    print(f'We have logged in as {bot.user}')
 
-@client.event
-async def on_message(message):
-    if message.author == client.user:
-        return
+@bot.command()
+async def hello(ctx):
+    await ctx.reply(f'Hello {ctx.author.name}!')
 
-    if message.content.startswith(f'{PREFIX}hello'):
-        await message.channel.send('Hello!')
-
-    if message.content.startswith(f'{PREFIX}verifyrole'):
-        target = re.search(r'\d+', message.content).group(0)
-        targetrole = message.guild.get_role(int(target))
-        set_verifyrole(targetrole)
-
-    if message.content.startswith(f'{PREFIX}welcomechannel'):
-        target = re.search(r'\d+', message.content).group(0)
-        targetchan = message.guild.get_channel(int(target))
-        set_welcomechannel(targetchan)
-
-    if message.content.startswith(f'{PREFIX}fakejoin'):
-        target = re.search(r'\d+', message.content).group(0)
-        await on_member_join(message.guild.get_member(int(target)))
-
-def set_verifyrole(role):
+@bot.hybrid_command()
+async def verifyrole(ctx, role: discord.Role):
     guild = role.guild
     settings = load_settings(guild)
     settings['VERIFY_ROLE'] = role.id
     save_settings(guild, settings)
-    print(f'Set verifyrole to {role.id} for guild {guild.id}')
+    await ctx.reply(f'Set verifyrole to <&{role}>')
 
-def set_welcomechannel(channel):
+@bot.hybrid_command()
+async def welcomechannel(ctx, channel: discord.TextChannel):
     guild = channel.guild
     settings = load_settings(guild)
     settings['WELCOME_CHANNEL'] = channel.id
     save_settings(guild, settings)
-    print(f'Set welcomechannel to {channel.id} for {guild.id}')
+    await ctx.reply(f'Set welcomechannel to <#{channel}>')
 
-@client.event
+@bot.hybrid_command()
+async def fakejoin(ctx, target: discord.Member):
+    await send_join_message(target)
+    await ctx.reply('k')
+
+@bot.command()
+async def sync(ctx):
+    if ctx.author.id == 246857845285453824: # me!
+        print('Syncing as requested...')
+        async with ctx.typing():
+            await bot.tree.sync()
+        await ctx.reply('Synced')
+    else:
+        await ctx.reply("You're not my supervisor!")
+
+@bot.event
 async def on_member_join(member):
+    await send_join_message(member)
+
+async def send_join_message(member):
     # load settings for the guild
     guild = member.guild
     settings = load_settings(guild)
@@ -82,12 +86,12 @@ async def on_member_join(member):
     # react to that message with :white_check_mark:
     await msg.add_reaction('✅')
 
-@client.event
+@bot.event
 async def on_raw_reaction_add(payload):
     reaction = payload.emoji
     user = payload.member
     guild = payload.member.guild
-    channel = client.get_channel(payload.channel_id)
+    channel = bot.get_channel(payload.channel_id)
     message = await channel.fetch_message(payload.message_id)
 
     # load settings for the guild
@@ -98,11 +102,11 @@ async def on_raw_reaction_add(payload):
     verifier = user
 
     # ignore it if it was us
-    if user == client.user:
+    if user == bot.user:
         return
 
     # if it's not one of ours we don't care
-    if message.author != client.user:
+    if message.author != bot.user:
         return
 
     # if it's one of ours, was it a join message?
@@ -125,4 +129,4 @@ async def on_raw_reaction_add(payload):
         new_content = re.sub(r'just joined and is waiting to be verified.*', f'has been verified by <@{verifier.id}>; welcome to the server!', message.content)
         await message.edit(content=new_content)
 
-client.run(config['DISCORD_TOKEN'])
+bot.run(config['DISCORD_TOKEN'])
