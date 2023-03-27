@@ -109,6 +109,10 @@ async def on_raw_reaction_add(payload):
     if message.author != bot.user:
         return
 
+    # if it wasn't a green check reaction then we don't care
+    if reaction.name != '✅':
+        return
+
     # if it's one of ours, was it a join message?
     if 'just joined and is waiting to be verified' not in message.content:
         print('reacted to a non-join message')
