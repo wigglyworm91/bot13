@@ -3,6 +3,7 @@ from discord.ext import commands
 import json
 import re
 from dotenv import dotenv_values
+import datetime as dt
 
 config = dotenv_values(".env")
 
@@ -28,7 +29,7 @@ def save_settings(guild, settings):
 
 @bot.event
 async def on_ready():
-    print(f'We have logged in as {bot.user}')
+    print(f'Logged in as {bot.user}')
 
 @bot.command()
 async def hello(ctx):
@@ -40,7 +41,7 @@ async def verifyrole(ctx, role: discord.Role):
     settings = load_settings(guild)
     settings['VERIFY_ROLE'] = role.id
     save_settings(guild, settings)
-    await ctx.reply(f'Set verifyrole to <&{role}>')
+    await ctx.reply(f'Set verifyrole to <@&{role}>')
 
 @bot.hybrid_command()
 async def welcomechannel(ctx, channel: discord.TextChannel):
@@ -55,7 +56,28 @@ async def fakejoin(ctx, target: discord.Member):
     await send_join_message(target)
     await ctx.reply('k')
 
-@bot.command()
+@bot.hybrid_command()
+async def modrole(ctx, role: discord.Role):
+    guild = role.guild
+    settings = load_settings(guild)
+    settings['MOD_ROLE'] = role.id
+    save_settings(guild, settings)
+    await ctx.reply(f'Set modrole to <@&{role}>')
+
+@bot.hybrid_command()
+async def lsync(ctx):
+    if ctx.author.id == 246857845285453824:  # Your user ID
+        if ctx.guild is None:
+            await ctx.reply("This command can only be used in a server.")
+            return
+
+        print(f'Syncing commands for guild: {ctx.guild.id}...')
+        await bot.tree.sync(guild=discord.Object(id=ctx.guild.id))
+        await ctx.reply(f"Commands synced for `{ctx.guild.name}`!")
+    else:
+        await ctx.reply("You're not my supervisor!")
+
+@bot.hybrid_command()
 async def sync(ctx):
     if ctx.author.id == 246857845285453824: # me!
         print('Syncing as requested...')
@@ -132,5 +154,48 @@ async def on_raw_reaction_add(payload):
         await verifee.add_roles(verify_role, reason=f'Verified by {verifier.name}#{verifier.discriminator} <@{verifier.id}>')
         new_content = re.sub(r'just joined and is waiting to be verified.*', f'has been verified by <@{verifier.id}>; welcome to the server!', message.content)
         await message.edit(content=new_content)
+
+@bot.hybrid_command(name="purge", description='Purge old messages over N hours (up to 14 days)')
+#@discord.app_commands.describe(
+#    hours='Will purge messages older than this many hours'
+#)
+async def purge_old_messages(
+    ctx,
+    hours: int,
+):
+    user = ctx.author
+
+    # load settings
+    settings = load_settings(ctx.guild)
+    mod_role = settings.get('MOD_ROLE', None)
+    if mod_role is None:
+        await ctx.reply('modrole must be configured first by an admin', ephemeral=True)
+        return
+
+    # check permission
+    if not any(role.id == mod_role for role in user.roles):
+        await ctx.reply(f'You need the <@&{mod_role}> role to use this command.', ephemeral=True)
+        return
+
+    # check data
+    if hours < 24:
+        await ctx.reply('Please enter a value of at least 24 hours.', ephemeral=True)
+        return
+    if hours > 14*24:
+        await ctx.reply('Note that we are not capable of deleting messages over 2 weeks old', ephemeral=True)
+        return
+
+    # make sure threshold_time is UTC timezone aware
+    now_time = dt.datetime.utcnow().replace(tzinfo=discord.utils.utcnow().tzinfo)
+    threshold_time = now_time - dt.timedelta(hours=hours)
+    def is_older_than_72h(msg):
+        # make sure we don't delete the message we're responding to
+        if msg == ctx.message:
+            return False
+        return msg.created_at < threshold_time
+
+    async with ctx.typing():
+        deleted = await ctx.channel.purge(limit=5000, check=is_older_than_72h)
+        await ctx.reply(f'Deleted {len(deleted)} {"message" if len(deleted)==1 else "messages"} older than {hours} hours.', ephemeral=True)
 
 bot.run(config['DISCORD_TOKEN'])
